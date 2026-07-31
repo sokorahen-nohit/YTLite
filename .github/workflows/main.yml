@@ -129,27 +129,11 @@ jobs:
           info = plistlib.loads(raw)
           url_types = info.setdefault("CFBundleURLTypes", [])
 
-          scheme_added = False
-
-          for url_type in url_types:
-              schemes = url_type.get("CFBundleURLSchemes")
-
-              if not isinstance(schemes, list):
-                  continue
-
-              if any(str(scheme).lower() == "youtube" for scheme in schemes):
-                  if "ytlitecustom" not in schemes:
-                      schemes.append("ytlitecustom")
-
-                  scheme_added = True
-                  break
-
-          if not scheme_added:
-              url_types.append({
-                  "CFBundleTypeRole": "Editor",
-                  "CFBundleURLName": "Open in YTLite",
-                  "CFBundleURLSchemes": ["ytlitecustom"],
-              })
+          url_types.append({
+              "CFBundleTypeRole": "Editor",
+              "CFBundleURLName": "com.google.ios.youtubeytlite.custom",
+              "CFBundleURLSchemes": ["ytlitecustom"],
+          })
 
           with open(path, "wb") as file:
               plistlib.dump(
