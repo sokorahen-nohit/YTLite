@@ -98,6 +98,76 @@ jobs:
             exit 1
           fi
 
+      - name: Add YTLite custom URL scheme
+        run: |
+          rm -rf ipa_work
+          mkdir ipa_work
+          unzip -q "${{ github.workspace }}/youtube.ipa" -d ipa_work
+
+          app_path="$(find ipa_work/Payload -maxdepth 1 -type d -name '*.app' | head -n 1)"
+
+          if [ -z "$app_path" ]; then
+            echo "::error::Could not find the app bundle inside the IPA."
+            exit 1
+          fi
+
+          PLIST_PATH="$app_path/Info.plist" python3 <<'PY'
+          import os
+          import plistlib
+
+          path = os.environ["PLIST_PATH"]
+
+          with open(path, "rb") as file:
+              raw = file.read()
+
+          plist_format = (
+              plistlib.FMT_BINARY
+              if raw.startswith(b"bplist00")
+              else plistlib.FMT_XML
+          )
+
+          info = plistlib.loads(raw)
+          url_types = info.setdefault("CFBundleURLTypes", [])
+
+          scheme_added = False
+
+          for url_type in url_types:
+              schemes = url_type.get("CFBundleURLSchemes")
+
+              if not isinstance(schemes, list):
+                  continue
+
+              if any(str(scheme).lower() == "youtube" for scheme in schemes):
+                  if "ytlitecustom" not in schemes:
+                      schemes.append("ytlitecustom")
+
+                  scheme_added = True
+                  break
+
+          if not scheme_added:
+              url_types.append({
+                  "CFBundleTypeRole": "Editor",
+                  "CFBundleURLName": "Open in YTLite",
+                  "CFBundleURLSchemes": ["ytlitecustom"],
+              })
+
+          with open(path, "wb") as file:
+              plistlib.dump(
+                  info,
+                  file,
+                  fmt=plist_format,
+                  sort_keys=False,
+              )
+
+          print("Added URL scheme: ytlitecustom")
+          PY
+
+          rm "${{ github.workspace }}/youtube.ipa"
+          (
+            cd ipa_work
+            zip -qry "${{ github.workspace }}/youtube.ipa" .
+          )
+
       - name: Install Dependencies
         run: brew install make ldid
 
