@@ -6,10 +6,15 @@
 - (void)pause;
 @end
 
-static __weak YTPlayerViewController *BTBGCurrentPlayer = nil;
+@interface YTMainAppControlsOverlayView : UIView
+@property(nonatomic, strong) YTPlayerViewController *playerViewController;
+@end
 
-static id BTBGBackgroundObserver = nil;
-static id BTBGRouteObserver = nil;
+static NSHashTable<YTPlayerViewController *> *BTBGPlayers;
+
+static id BTBGWillResignObserver;
+static id BTBGBackgroundObserver;
+static id BTBGRouteObserver;
 
 static BOOL BTBGHasBluetoothOutput(void) {
     AVAudioSessionRouteDescription *route =
@@ -29,13 +34,59 @@ static BOOL BTBGHasBluetoothOutput(void) {
 }
 
 static BOOL BTBGAppIsInBackground(void) {
-    UIApplicationState state =
-        [UIApplication sharedApplication].applicationState;
-
-    return state != UIApplicationStateActive;
+    return [UIApplication sharedApplication].applicationState ==
+           UIApplicationStateBackground;
 }
 
-static void BTBGPauseIfNeeded(void) {
+static void BTBGRememberPlayer(YTPlayerViewController *player) {
+    if (!player) {
+        return;
+    }
+
+    [BTBGPlayers addObject:player];
+}
+
+static void BTBGFindPlayersInController(UIViewController *controller) {
+    if (!controller) {
+        return;
+    }
+
+    Class playerClass = NSClassFromString(@"YTPlayerViewController");
+
+    if (playerClass && [controller isKindOfClass:playerClass]) {
+        BTBGRememberPlayer((YTPlayerViewController *)controller);
+    }
+
+    for (UIViewController *child in controller.childViewControllers) {
+        BTBGFindPlayersInController(child);
+    }
+
+    if (controller.presentedViewController) {
+        BTBGFindPlayersInController(
+            controller.presentedViewController
+        );
+    }
+}
+
+static void BTBGDiscoverVisiblePlayers(void) {
+    for (UIScene *scene in
+         [UIApplication sharedApplication].connectedScenes) {
+
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
+            continue;
+        }
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+        for (UIWindow *window in windowScene.windows) {
+            BTBGFindPlayersInController(
+                window.rootViewController
+            );
+        }
+    }
+}
+
+static void BTBGPauseNow(void) {
     if (!BTBGAppIsInBackground()) {
         return;
     }
@@ -44,48 +95,103 @@ static void BTBGPauseIfNeeded(void) {
         return;
     }
 
-    YTPlayerViewController *player = BTBGCurrentPlayer;
+    BTBGDiscoverVisiblePlayers();
 
-    if (player &&
-        [player respondsToSelector:@selector(pause)]) {
-        [player pause];
+    for (YTPlayerViewController *player in BTBGPlayers.allObjects) {
+        if ([player respondsToSelector:@selector(pause)]) {
+            [player pause];
+        }
     }
 }
 
-static void BTBGSchedulePauseCheck(void) {
-    dispatch_after(
-        dispatch_time(
-            DISPATCH_TIME_NOW,
-            (int64_t)(0.25 * NSEC_PER_SEC)
-        ),
-        dispatch_get_main_queue(),
-        ^{
-            BTBGPauseIfNeeded();
-        }
-    );
+static void BTBGSchedulePauseChecks(void) {
+    NSArray<NSNumber *> *delays = @[
+        @0.05,
+        @0.20,
+        @0.50,
+        @1.00,
+        @1.60
+    ];
+
+    for (NSNumber *delayValue in delays) {
+        NSTimeInterval delay = delayValue.doubleValue;
+
+        dispatch_after(
+            dispatch_time(
+                DISPATCH_TIME_NOW,
+                (int64_t)(delay * NSEC_PER_SEC)
+            ),
+            dispatch_get_main_queue(),
+            ^{
+                BTBGPauseNow();
+            }
+        );
+    }
 }
 
 %hook YTPlayerViewController
 
 - (void)loadWithPlayerTransition:(id)transition
                   playbackConfig:(id)config {
+    BTBGRememberPlayer(self);
+
     %orig;
 
-    BTBGCurrentPlayer = self;
+    BTBGRememberPlayer(self);
 }
 
 - (void)play {
-    BTBGCurrentPlayer = self;
+    BTBGRememberPlayer(self);
 
     %orig;
+
+    /*
+     * YouTubeがバックグラウンド移行後に再度playを呼んでも、
+     * Bluetooth未接続なら再び停止する。
+     */
+    if (BTBGAppIsInBackground() &&
+        !BTBGHasBluetoothOutput()) {
+        BTBGSchedulePauseChecks();
+    }
+}
+
+%end
+
+%hook YTMainAppControlsOverlayView
+
+- (void)setPlayerViewController:
+    (YTPlayerViewController *)playerViewController {
+
+    %orig;
+
+    BTBGRememberPlayer(playerViewController);
+}
+
+- (void)didMoveToWindow {
+    %orig;
+
+    BTBGRememberPlayer(self.playerViewController);
 }
 
 %end
 
 %ctor {
     @autoreleasepool {
+        BTBGPlayers = [NSHashTable weakObjectsHashTable];
+
         NSNotificationCenter *center =
             [NSNotificationCenter defaultCenter];
+
+        BTBGWillResignObserver =
+            [center
+                addObserverForName:
+                    UIApplicationWillResignActiveNotification
+                object:nil
+                queue:[NSOperationQueue mainQueue]
+                usingBlock:^(NSNotification *notification) {
+                    (void)notification;
+                    BTBGSchedulePauseChecks();
+                }];
 
         BTBGBackgroundObserver =
             [center
@@ -95,8 +201,7 @@ static void BTBGSchedulePauseCheck(void) {
                 queue:[NSOperationQueue mainQueue]
                 usingBlock:^(NSNotification *notification) {
                     (void)notification;
-
-                    BTBGSchedulePauseCheck();
+                    BTBGSchedulePauseChecks();
                 }];
 
         BTBGRouteObserver =
@@ -109,7 +214,7 @@ static void BTBGSchedulePauseCheck(void) {
                     (void)notification;
 
                     if (BTBGAppIsInBackground()) {
-                        BTBGSchedulePauseCheck();
+                        BTBGSchedulePauseChecks();
                     }
                 }];
     }
