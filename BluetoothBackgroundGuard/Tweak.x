@@ -22,8 +22,32 @@ static BOOL BTBGHasBluetoothOutput(void) {
 }
 
 static void BTBGShowMessage(NSString *title, NSString *message) {
-    UIViewController *controller =
-        UIApplication.sharedApplication.keyWindow.rootViewController;
+    UIWindow *activeWindow = nil;
+
+    for (UIScene *scene in UIApplication.sharedApplication.connectedScenes) {
+        if (![scene isKindOfClass:[UIWindowScene class]]) {
+            continue;
+        }
+
+        if (scene.activationState != UISceneActivationStateForegroundActive) {
+            continue;
+        }
+
+        UIWindowScene *windowScene = (UIWindowScene *)scene;
+
+        for (UIWindow *window in windowScene.windows) {
+            if (window.isKeyWindow) {
+                activeWindow = window;
+                break;
+            }
+        }
+
+        if (activeWindow) {
+            break;
+        }
+    }
+
+    UIViewController *controller = activeWindow.rootViewController;
 
     while (controller.presentedViewController) {
         controller = controller.presentedViewController;
@@ -32,6 +56,21 @@ static void BTBGShowMessage(NSString *title, NSString *message) {
     if (!controller) {
         return;
     }
+
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:title
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
+
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"OK"
+                                 style:UIAlertActionStyleDefault
+                               handler:nil]];
+
+    [controller presentViewController:alert
+                             animated:YES
+                           completion:nil];
+}
 
     UIAlertController *alert =
         [UIAlertController alertControllerWithTitle:title
