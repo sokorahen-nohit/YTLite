@@ -137,10 +137,13 @@ jobs:
       - name: Install cyan
         run: pipx install --force https://github.com/asdfzxcvbn/pyzule-rw/archive/main.zip
 
-      - name: Clone YouTubeHeader for YTLite
+      - name: Clone build headers for YTLite
         run: |
           rm -rf "${{ github.workspace }}/YouTubeHeader"
           git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git "${{ github.workspace }}/YouTubeHeader"
+
+          rm -rf "${{ github.workspace }}/protobuf"
+          git clone --quiet --depth=1 --branch v25.3 https://github.com/protocolbuffers/protobuf.git "${{ github.workspace }}/protobuf"
 
       - name: Build custom YouTube Plus
         run: |
