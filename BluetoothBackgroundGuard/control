@@ -1,7 +1,7 @@
 Package: com.ytlitecustom.bluetoothbackgroundguard
 Name: Bluetooth Background Guard
 Version: 0.1.0
-Architecture: iphoneos-arm64
+Architecture: iphoneos-arm
 Description: Allows YouTube background playback only with Bluetooth audio output.
 Maintainer: YTLite Custom
 Author: YTLite Custom
