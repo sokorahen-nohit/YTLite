@@ -1,13 +1,8 @@
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 
-@interface NSObject (BTBGPlayerControl)
-- (void)pause;
-@end
-
-static __weak id BTBGCurrentPlayer = nil;
-static id BTBGBackgroundObserver = nil;
-static id BTBGRouteObserver = nil;
+static BOOL BTBGDidEnterBackground = NO;
+static BOOL BTBGHadBluetoothOutput = NO;
 
 static BOOL BTBGHasBluetoothOutput(void) {
     AVAudioSessionRouteDescription *route =
@@ -26,64 +21,79 @@ static BOOL BTBGHasBluetoothOutput(void) {
     return NO;
 }
 
-static BOOL BTBGAppIsNotActive(void) {
-    UIApplicationState state =
-        [UIApplication sharedApplication].applicationState;
+static void BTBGShowMessage(NSString *title, NSString *message) {
+    UIViewController *controller =
+        UIApplication.sharedApplication.keyWindow.rootViewController;
 
-    return state != UIApplicationStateActive;
-}
+    while (controller.presentedViewController) {
+        controller = controller.presentedViewController;
+    }
 
-static void BTBGPauseCurrentPlayer(void) {
-    if (BTBGHasBluetoothOutput()) {
+    if (!controller) {
         return;
     }
 
-    id player = BTBGCurrentPlayer;
+    UIAlertController *alert =
+        [UIAlertController alertControllerWithTitle:title
+                                            message:message
+                                     preferredStyle:UIAlertControllerStyleAlert];
 
-    if (player && [player respondsToSelector:@selector(pause)]) {
-        [player pause];
-    }
+    [alert addAction:
+        [UIAlertAction actionWithTitle:@"OK"
+                                 style:UIAlertActionStyleDefault
+                               handler:nil]];
+
+    [controller presentViewController:alert animated:YES completion:nil];
 }
-
-%hook YTPlayerViewController
-
-- (void)loadWithPlayerTransition:(id)transition
-                  playbackConfig:(id)config {
-    %orig;
-    BTBGCurrentPlayer = self;
-}
-
-- (void)dealloc {
-    if (BTBGCurrentPlayer == self) {
-        BTBGCurrentPlayer = nil;
-    }
-
-    %orig;
-}
-
-%end
 
 %ctor {
     @autoreleasepool {
         NSNotificationCenter *center =
             [NSNotificationCenter defaultCenter];
 
-        BTBGBackgroundObserver =
-            [center addObserverForName:UIApplicationDidEnterBackgroundNotification
-                                object:nil
-                                 queue:[NSOperationQueue mainQueue]
-                            usingBlock:^(__unused NSNotification *notification) {
-                BTBGPauseCurrentPlayer();
-            }];
-
-        BTBGRouteObserver =
-            [center addObserverForName:AVAudioSessionRouteChangeNotification
-                                object:nil
-                                 queue:[NSOperationQueue mainQueue]
-                            usingBlock:^(__unused NSNotification *notification) {
-                if (BTBGAppIsNotActive()) {
-                    BTBGPauseCurrentPlayer();
+        [center addObserverForName:UIApplicationDidFinishLaunchingNotification
+                           object:nil
+                            queue:[NSOperationQueue mainQueue]
+                       usingBlock:^(__unused NSNotification *notification) {
+            dispatch_after(
+                dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                    BTBGShowMessage(
+                        @"Bluetooth Guard",
+                        @"補助Tweakの読み込みに成功しました。"
+                    );
                 }
-            }];
+            );
+        }];
+
+        [center addObserverForName:UIApplicationDidEnterBackgroundNotification
+                           object:nil
+                            queue:[NSOperationQueue mainQueue]
+                       usingBlock:^(__unused NSNotification *notification) {
+            BTBGDidEnterBackground = YES;
+            BTBGHadBluetoothOutput = BTBGHasBluetoothOutput();
+        }];
+
+        [center addObserverForName:UIApplicationWillEnterForegroundNotification
+                           object:nil
+                            queue:[NSOperationQueue mainQueue]
+                       usingBlock:^(__unused NSNotification *notification) {
+            if (!BTBGDidEnterBackground) {
+                return;
+            }
+
+            BTBGDidEnterBackground = NO;
+
+            NSString *result = BTBGHadBluetoothOutput
+                ? @"バックグラウンド移行時：Bluetoothあり"
+                : @"バックグラウンド移行時：Bluetoothなし";
+
+            dispatch_after(
+                dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)),
+                dispatch_get_main_queue(), ^{
+                    BTBGShowMessage(@"診断結果", result);
+                }
+            );
+        }];
     }
 }
